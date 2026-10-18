@@ -37,6 +37,7 @@ type
     MinArea: Integer;             // smaller components are treated as noise
     SpaceRatio: Single;           // max gap (x line height) before a space is inserted
     WholeImage: Boolean;          // treat all ink in the image as ONE symbol (character or word)
+    ThaiMarks: Boolean;           // Thai: upper/lower vowels and tone marks are separate symbols
   end;
 
   TGlyph = record
@@ -53,8 +54,18 @@ type
 function DefaultOcrOptions: TOcrOptions;
 function BitmapToBinary(Bmp: TBitmap; const Opt: TOcrOptions; out UsedThreshold: Integer): TBinImage;
 function SegmentGlyphs(const Bin: TBinImage; const Opt: TOcrOptions): TGlyphArray;
+// same, also returns the component label map needed by MergeGlyphs
+function SegmentGlyphsEx(const Bin: TBinImage; const Opt: TOcrOptions; out Lab: TIntArr): TGlyphArray;
+// manual corrections: merge symbol B into A (features are recomputed) / remove one symbol
+procedure MergeGlyphs(const Bin: TBinImage; const Lab: TIntArr; var G: TGlyphArray; A, B: Integer);
+procedure RemoveGlyph(var G: TGlyphArray; Idx: Integer);
 function ShiftFeature(const F: TFeature; DX, DY: Integer): TFeature;
 function IsCombiningMark(CP: Cardinal): Boolean;
+const
+  // label of the separate bottom stroke of Thai YO YING when marks are kept separate;
+  // it is learned like any symbol and removed from the text that is read
+  TAIL_YO_YING = '(' + #$E0#$B8#$8D + ')';
+
 function TokenizeLabels(const S: string; SplitSpace, MergeCombining: Boolean): TStringArr;
 function GlyphsToText(const G: TGlyphArray; const Opt: TOcrOptions): string;
 
@@ -64,12 +75,16 @@ const
   NIKHAHIT = #$E0#$B9#$8D;   // U+0E4D
   SARA_AA = #$E0#$B8#$B2;    // U+0E32
   SARA_AM = #$E0#$B8#$B3;    // U+0E33
+  SARA_E = #$E0#$B9#$80;     // U+0E40
+  SARA_AE = #$E0#$B9#$81;    // U+0E41 (drawn as two SARA E)
+  YO_YING = #$E0#$B8#$8D;    // U+0E0D (its bottom stroke is a separate piece)
 
 type
   TComp = record
     L, T, R, B: Integer;
     Area: Integer;
     Ids: TIntArr;
+    Zone: Integer;      // Thai mode: 0 = body (middle zone), 1 = mark above, -1 = mark below
   end;
   TCompArray = array of TComp;
   TPointArray = array of TPoint;
@@ -83,6 +98,7 @@ begin
   Result.MinArea := 4;
   Result.SpaceRatio := 0.4;
   Result.WholeImage := False;
+  Result.ThaiMarks := False;
 end;
 
 function OtsuThreshold(const Hist: array of Integer; Total: Integer): Integer;
@@ -234,7 +250,11 @@ begin
       end;
       Heights[j + 1] := Med;
     end;
-    Med := Heights[Length(Heights) div 2];
+    // reference height = median of the "real" text bands (at least half the tallest),
+    // so that many thin mark bands cannot pull the reference down
+    j := 0;
+    while Heights[j] < 0.5 * Heights[High(Heights)] do Inc(j);
+    Med := Heights[j + (High(Heights) - j + 1) div 2];
 
     for i := 0 to High(Result) do
       if (Result[i].Y - Result[i].X) < 0.45 * Med then
@@ -323,12 +343,161 @@ end;
 
 function SegmentGlyphs(const Bin: TBinImage; const Opt: TOcrOptions): TGlyphArray;
 var
-  Lab, Stack: TIntArr;
+  Lab: TIntArr;
+begin
+  Result := SegmentGlyphsEx(Bin, Opt, Lab);
+end;
+
+function SegmentGlyphsEx(const Bin: TBinImage; const Opt: TOcrOptions; out Lab: TIntArr): TGlyphArray;
+var
+  Stack: TIntArr;
   Lines: TPointArray;
   Comps: TCompArray;
   NextId, LineIdx, NG, i, j, k, x, y, p, q, px, py, dx, dy, nx, ny, SP, Ov: Integer;
+  LH, CW, CH, TW, THt, HGap, VGap, Score, Best, BestScore: Integer;
+  CY: Double;
   C, Tmp: TComp;
   Changed: Boolean;
+
+  procedure SortInts(var A: TIntArr);
+  var
+    a1, b1, v: Integer;
+  begin
+    for a1 := 1 to High(A) do
+    begin
+      v := A[a1];
+      b1 := a1 - 1;
+      while (b1 >= 0) and (A[b1] > v) do
+      begin
+        A[b1 + 1] := A[b1];
+        Dec(b1);
+      end;
+      A[b1 + 1] := v;
+    end;
+  end;
+
+  // Thai mode: find the middle zone (where consonant bodies are) and mark
+  // pieces that lie completely above or below it as vowel / tone marks
+  procedure ClassifyZones;
+  var
+    Tops, Bots: TIntArr;
+    m, n, MidTop, MidBot, Tol: Integer;
+  begin
+    SetLength(Tops, Length(Comps));
+    SetLength(Bots, Length(Comps));
+    n := 0;
+    for m := 0 to High(Comps) do
+      if Comps[m].B - Comps[m].T >= 0.3 * LH then
+      begin
+        Tops[n] := Comps[m].T;
+        Bots[n] := Comps[m].B;
+        Inc(n);
+      end;
+    if n = 0 then
+    begin
+      for m := 0 to High(Comps) do
+        Comps[m].Zone := 0;
+      Exit;
+    end;
+    SetLength(Tops, n);
+    SetLength(Bots, n);
+    SortInts(Tops);
+    SortInts(Bots);
+    MidTop := Tops[n div 2];
+    MidBot := Bots[n div 2];
+    Tol := Max(1, Round(0.1 * (MidBot - MidTop)));
+    n := MidBot - MidTop;
+    for m := 0 to High(Comps) do
+      if (Comps[m].B <= MidTop + Tol) or
+         // small piece whose centre is above the body zone (some fonts place tone marks low)
+         ((Comps[m].B - Comps[m].T <= 0.45 * n) and (Comps[m].R - Comps[m].L <= 0.7 * n) and
+          ((Comps[m].T + Comps[m].B) / 2 < MidTop)) then
+        Comps[m].Zone := 1
+      else if (Comps[m].T >= MidBot - Tol) or
+         ((Comps[m].B - Comps[m].T <= 0.45 * n) and (Comps[m].R - Comps[m].L <= 0.7 * n) and
+          ((Comps[m].T + Comps[m].B) / 2 > MidBot)) then
+        Comps[m].Zone := -1
+      else
+        Comps[m].Zone := 0;
+  end;
+
+  // Thai mode: put every mark right after its base consonant, in Unicode order:
+  // base, lower vowel, upper vowel, tone mark (marks closer to the base come first)
+  procedure OrderThaiMarks;
+  var
+    BaseOf, Keys, Idx: TIntArr;
+    Sorted: TCompArray;
+    m, b, n, Ovl, BestOv, BestGap, Gap, a1, b1, kv, iv: Integer;
+  begin
+    SetLength(BaseOf, Length(Comps));
+    for m := 0 to High(Comps) do
+    begin
+      BaseOf[m] := -1;
+      if Comps[m].Zone = 0 then Continue;
+      BestOv := 0;
+      BestGap := MaxInt;
+      for b := 0 to High(Comps) do
+      begin
+        if Comps[b].Zone <> 0 then Continue;
+        Ovl := Min(Comps[m].R, Comps[b].R) - Max(Comps[m].L, Comps[b].L);
+        if Ovl > BestOv then
+        begin
+          BestOv := Ovl;
+          BaseOf[m] := b;
+          BestGap := 0;
+        end
+        else if (BestOv = 0) and (Ovl <= 0) and (-Ovl < BestGap) then
+        begin
+          BestGap := -Ovl;
+          BaseOf[m] := b;
+        end;
+      end;
+    end;
+    SetLength(Sorted, Length(Comps));
+    n := 0;
+    for m := 0 to High(Comps) do
+    begin
+      if (Comps[m].Zone <> 0) and (BaseOf[m] >= 0) then Continue;
+      Sorted[n] := Comps[m];
+      Inc(n);
+      if Comps[m].Zone <> 0 then Continue;
+      // marks of this base: below first, then above, each by distance from the base
+      Idx := nil;
+      Keys := nil;
+      for b := 0 to High(Comps) do
+        if BaseOf[b] = m then
+        begin
+          SetLength(Idx, Length(Idx) + 1);
+          SetLength(Keys, Length(Keys) + 1);
+          Idx[High(Idx)] := b;
+          if Comps[b].Zone < 0 then
+            Keys[High(Keys)] := Comps[b].T - Comps[m].B
+          else
+            Keys[High(Keys)] := 100000 + Comps[m].T - Comps[b].B;
+        end;
+      for a1 := 1 to High(Keys) do
+      begin
+        kv := Keys[a1];
+        iv := Idx[a1];
+        b1 := a1 - 1;
+        while (b1 >= 0) and (Keys[b1] > kv) do
+        begin
+          Keys[b1 + 1] := Keys[b1];
+          Idx[b1 + 1] := Idx[b1];
+          Dec(b1);
+        end;
+        Keys[b1 + 1] := kv;
+        Idx[b1 + 1] := iv;
+      end;
+      for a1 := 0 to High(Idx) do
+      begin
+        Sorted[n] := Comps[Idx[a1]];
+        Inc(n);
+      end;
+    end;
+    SetLength(Sorted, n);
+    Comps := Sorted;
+  end;
 
   procedure Push(Idx: Integer);
   begin
@@ -338,8 +507,27 @@ var
     Inc(SP);
   end;
 
+  // merge component Src into Dst and remove Src
+  procedure MergeInto(Dst, Src: Integer);
+  var
+    m: Integer;
+  begin
+    Comps[Dst].L := Min(Comps[Dst].L, Comps[Src].L);
+    Comps[Dst].R := Max(Comps[Dst].R, Comps[Src].R);
+    Comps[Dst].T := Min(Comps[Dst].T, Comps[Src].T);
+    Comps[Dst].B := Max(Comps[Dst].B, Comps[Src].B);
+    Inc(Comps[Dst].Area, Comps[Src].Area);
+    for m := 0 to High(Comps[Src].Ids) do
+    begin
+      SetLength(Comps[Dst].Ids, Length(Comps[Dst].Ids) + 1);
+      Comps[Dst].Ids[High(Comps[Dst].Ids)] := Comps[Src].Ids[m];
+    end;
+    Delete(Comps, Src, 1);
+  end;
+
 begin
   Result := nil;
+  Lab := nil;
   if (Bin.W = 0) or (Bin.H = 0) then Exit;
   SetLength(Lab, Bin.W * Bin.H);
   Lines := FindLines(Bin, Opt.MinArea);
@@ -357,7 +545,7 @@ begin
         p := y * Bin.W + x;
         if (Bin.Data[p] = 0) or (Lab[p] <> 0) then Continue;
         Inc(NextId);
-        C.L := x; C.R := x + 1; C.T := y; C.B := y + 1; C.Area := 0;
+        C.L := x; C.R := x + 1; C.T := y; C.B := y + 1; C.Area := 0; C.Zone := 0;
         SetLength(C.Ids, 1);
         C.Ids[0] := NextId;
         Lab[p] := NextId;
@@ -394,28 +582,27 @@ begin
         C.Ids := nil;
       end;
 
-    // merge components that overlap horizontally (dot of i, Thai upper/lower vowels)
-    if Opt.MergeParts then
+    LH := Max(1, Lines[LineIdx].Y - Lines[LineIdx].X);
+    if Opt.ThaiMarks then
+    begin
+      ClassifyZones;
+      // Thai THO THAN: its bottom stroke is wide and centred under the body
+      // (lower vowels sit on the right and are narrower) -> join it to the body
       repeat
         Changed := False;
         for i := 0 to High(Comps) do
         begin
-          for j := i + 1 to High(Comps) do
+          if Comps[i].Zone <> -1 then Continue;
+          for j := 0 to High(Comps) do
           begin
-            Ov := Min(Comps[i].R, Comps[j].R) - Max(Comps[i].L, Comps[j].L);
-            if (Ov > 0) and (Ov >= 0.5 * Min(Comps[i].R - Comps[i].L, Comps[j].R - Comps[j].L)) then
+            if (j = i) or (Comps[j].Zone <> 0) then Continue;
+            TW := Comps[j].R - Comps[j].L;
+            if TW <= 0 then Continue;
+            CY := ((Comps[i].L + Comps[i].R) / 2 - Comps[j].L) / TW;   // relative centre
+            if (Comps[i].R - Comps[i].L >= 0.75 * TW) and (CY > 0.25) and (CY < 0.55) and
+               (Comps[i].T - Comps[j].B <= Max(2, LH div 10)) then
             begin
-              Comps[i].L := Min(Comps[i].L, Comps[j].L);
-              Comps[i].R := Max(Comps[i].R, Comps[j].R);
-              Comps[i].T := Min(Comps[i].T, Comps[j].T);
-              Comps[i].B := Max(Comps[i].B, Comps[j].B);
-              Inc(Comps[i].Area, Comps[j].Area);
-              for k := 0 to High(Comps[j].Ids) do
-              begin
-                SetLength(Comps[i].Ids, Length(Comps[i].Ids) + 1);
-                Comps[i].Ids[High(Comps[i].Ids)] := Comps[j].Ids[k];
-              end;
-              Delete(Comps, j, 1);
+              MergeInto(j, i);
               Changed := True;
               Break;
             end;
@@ -423,6 +610,74 @@ begin
           if Changed then Break;
         end;
       until not Changed;
+    end;
+
+    // merge components that overlap horizontally (dot of i, Thai upper/lower vowels)
+    if Opt.MergeParts or Opt.ThaiMarks then
+      repeat
+        Changed := False;
+        for i := 0 to High(Comps) do
+        begin
+          for j := i + 1 to High(Comps) do
+          begin
+            // Thai mode: vowel and tone marks stay separate symbols
+            if Opt.ThaiMarks and ((Comps[i].Zone <> 0) or (Comps[j].Zone <> 0)) then Continue;
+            Ov := Min(Comps[i].R, Comps[j].R) - Max(Comps[i].L, Comps[j].L);
+            if (Ov > 0) and (Ov >= 0.5 * Min(Comps[i].R - Comps[i].L, Comps[j].R - Comps[j].L)) then
+            begin
+              MergeInto(i, j);
+              Changed := True;
+              Break;
+            end;
+          end;
+          if Changed then Break;
+        end;
+      until not Changed;
+
+    // attach small round marks that sit just above or below a symbol but beside it,
+    // e.g. the dot of i/j in script fonts (Segoe Script, Segoe Print)
+    if Opt.MergeParts and not Opt.ThaiMarks then
+    begin
+      repeat
+        Changed := False;
+        for i := 0 to High(Comps) do
+        begin
+          CW := Comps[i].R - Comps[i].L;
+          CH := Comps[i].B - Comps[i].T;
+          // only small, roughly round pieces (not apostrophes or dashes in the middle)
+          if (CW > 0.3 * LH) or (CH > 0.3 * LH) or (CH > 1.8 * CW + 1) then Continue;
+          CY := (Comps[i].T + Comps[i].B) / 2;
+          Best := -1;
+          BestScore := MaxInt;
+          for j := 0 to High(Comps) do
+          begin
+            if j = i then Continue;
+            TW := Comps[j].R - Comps[j].L;
+            THt := Comps[j].B - Comps[j].T;
+            if (TW <= 0.3 * LH) and (THt <= 0.3 * LH) then Continue;   // target must be a real symbol
+            // only marks clearly ABOVE the symbol (with a gap): commas and periods sit on
+            // the baseline next to a letter and must stay separate
+            if not ((Comps[i].B <= Comps[j].T) and (CY < Comps[j].T)) then Continue;
+            HGap := Max(0, Max(Comps[i].L, Comps[j].L) - Min(Comps[i].R, Comps[j].R));
+            if HGap > Max(2, Round(0.12 * LH)) then Continue;
+            VGap := Comps[j].T - Comps[i].B;
+            if VGap > 0.5 * LH then Continue;
+            Score := HGap * 4 + VGap;
+            if Score < BestScore then
+            begin
+              BestScore := Score;
+              Best := j;
+            end;
+          end;
+          if Best >= 0 then
+          begin
+            MergeInto(Best, i);
+            Changed := True;
+            Break;
+          end;
+        end;
+      until not Changed;
+    end;
 
     // sort left to right
     for i := 1 to High(Comps) do
@@ -436,6 +691,8 @@ begin
       end;
       Comps[j + 1] := Tmp;
     end;
+    if Opt.ThaiMarks then
+      OrderThaiMarks;
 
     for i := 0 to High(Comps) do
     begin
@@ -474,6 +731,33 @@ begin
     Result[0].LineBottom := Result[0].R.Bottom;
     Result[0].Feat := CalcFeature(Bin, Lab, Result[0]);
   end;
+end;
+
+procedure MergeGlyphs(const Bin: TBinImage; const Lab: TIntArr; var G: TGlyphArray; A, B: Integer);
+var
+  k: Integer;
+begin
+  if (A = B) or (A < 0) or (B < 0) or (A > High(G)) or (B > High(G)) then Exit;
+  if Length(Lab) <> Bin.W * Bin.H then Exit;
+  G[A].R.Left := Min(G[A].R.Left, G[B].R.Left);
+  G[A].R.Top := Min(G[A].R.Top, G[B].R.Top);
+  G[A].R.Right := Max(G[A].R.Right, G[B].R.Right);
+  G[A].R.Bottom := Max(G[A].R.Bottom, G[B].R.Bottom);
+  G[A].LineTop := Min(G[A].LineTop, G[B].LineTop);
+  G[A].LineBottom := Max(G[A].LineBottom, G[B].LineBottom);
+  for k := 0 to High(G[B].Ids) do
+  begin
+    SetLength(G[A].Ids, Length(G[A].Ids) + 1);
+    G[A].Ids[High(G[A].Ids)] := G[B].Ids[k];
+  end;
+  G[A].Feat := CalcFeature(Bin, Lab, G[A]);
+  RemoveGlyph(G, B);
+end;
+
+procedure RemoveGlyph(var G: TGlyphArray; Idx: Integer);
+begin
+  if (Idx < 0) or (Idx > High(G)) then Exit;
+  Delete(G, Idx, 1);
 end;
 
 { ---------- Labels / text ---------- }
@@ -533,10 +817,22 @@ begin
     SetString(Ch, P, Len);
     if (CP = 32) or (CP = 9) or (CP = 10) or (CP = 13) or (CP = $A0) then
       // skip whitespace
-    else if MergeCombining and (CP = $0E33) then
+    else if CP = $0E41 then
+    begin
+      // Thai SARA AE is drawn as two SARA E side by side
+      Add(SARA_E);
+      Add(SARA_E);
+    end
+    else if (CP = $0E0D) and not MergeCombining then
+    begin
+      // Thai YO YING: body + separate bottom stroke
+      Add(YO_YING);
+      Add(TAIL_YO_YING);
+    end
+    else if CP = $0E33 then
     begin
       // Thai SARA AM = NIKHAHIT (sits on the previous consonant) + SARA AA (separate symbol)
-      if n > 0 then
+      if MergeCombining and (n > 0) then
         Result[n - 1] := Result[n - 1] + NIKHAHIT
       else
         Add(NIKHAHIT);
@@ -610,7 +906,13 @@ begin
     end;
     Inc(i);
   end;
+  // SARA AM with a tone mark, e.g. NAM: the tone mark is read between the two parts
+  for i := $48 to $4B do   // U+0E48..U+0E4B tone marks
+    Result := StringReplace(Result, NIKHAHIT + #$E0#$B9 + Chr($80 + i - $40) + SARA_AA,
+      #$E0#$B9 + Chr($80 + i - $40) + SARA_AM, [rfReplaceAll]);
   Result := StringReplace(Result, NIKHAHIT + SARA_AA, SARA_AM, [rfReplaceAll]);
+  Result := StringReplace(Result, SARA_E + SARA_E, SARA_AE, [rfReplaceAll]);
+  Result := StringReplace(Result, TAIL_YO_YING, '', [rfReplaceAll]);
 end;
 
 end.

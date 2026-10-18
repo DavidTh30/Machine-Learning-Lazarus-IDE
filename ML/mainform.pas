@@ -6,7 +6,7 @@ interface
 
 uses
   Classes, SysUtils, Forms, Controls, Graphics, Dialogs, StdCtrls, ExtCtrls,
-  ComCtrls, Spin, ExtDlgs, Clipbrd, Math, LCLType, IntfGraphics, FPImage,
+  ComCtrls, Spin, ExtDlgs, Clipbrd, Math, LCLType, IntfGraphics, FPImage, Menus,
   OcrEngine, OcrModel, ModelInspector;
 
 type
@@ -45,6 +45,7 @@ type
     chkShowBinary: TCheckBox;
     chkShowBoxes: TCheckBox;
     chkSplitSpace: TCheckBox;
+    chkThaiMarks: TCheckBox;
     chkWholeImage: TCheckBox;
     FontDialog1: TFontDialog;
     gbTrain: TGroupBox;
@@ -135,7 +136,11 @@ type
     FBinBmp: TBitmap;           // black and white image for display
     FHasImage: Boolean;
     FBin: TBinImage;
+    FLab: TIntArr;              // component map of the last segmentation (for manual merging)
     FThreshold: Integer;
+    FGlyphMenu: TPopupMenu;
+    FMenuGlyph: Integer;        // symbol that was right-clicked
+    FSetMenu: TPopupMenu;       // sample sets for "Generate from font..."
     FGlyphs: TGlyphArray;
     FMode: TGlyphMode;
     FTokens: TStringArr;
@@ -162,6 +167,17 @@ type
     procedure RefreshClassList;
     procedure UpdateButtons;
     procedure ShowHelp;
+    procedure CreateGlyphMenu;
+    procedure CreateSetMenu;
+    procedure SampleSetClick(Sender: TObject);
+    procedure GenerateFromFont;
+    procedure ShowGlyphMenu(Idx: Integer);
+    procedure AfterGlyphEdit(const What: string);
+    procedure MergePrevClick(Sender: TObject);
+    procedure MergeNextClick(Sender: TObject);
+    procedure RemoveGlyphClick(Sender: TObject);
+    procedure ImageMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+    procedure GlyphsMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
     function TrainProgress(Epoch, Total: Integer; Loss, Acc: Single): Boolean;
   end;
 
@@ -182,6 +198,15 @@ const
     'ABCDEFGHIJKLMNOPQRSTUVWXYZ' + LineEnding +
     'abcdefghijklmnopqrstuvwxyz' + LineEnding +
     '0123456789';
+  // Thai sample sets (UTF-8). Vowels and tone marks are drawn on the carrier O ANG.
+  THAI_CONSONANTS =
+    'กขฃคฅฆงจฉชซฌญฎฏฐฑฒณดต' + LineEnding +
+    'ถทธนบปผฝพฟภมยรลวศษสหฬอฮ';
+  THAI_VOWELS =
+    'อะ อา อำ เอ แอ โอ ใอ ไอ ฤ ฦ ๆ ฯ' + LineEnding +
+    'อิ อี อึ อื อุ อู อั อ็' + LineEnding +
+    'อ่ อ้ อ๊ อ๋ อ์';
+  THAI_DIGITS = '๐๑๒๓๔๕๖๗๘๙';
 
   HELP_TEXT =
     'LAZARUS OCR - LEARN AND READ TEXT FROM IMAGES' + LineEnding +
@@ -203,9 +228,29 @@ const
     ' - Click "Segment symbols". The strip under the image shows every symbol that was found' + LineEnding +
     '   (as the 16x16 grid the classifier sees) together with the label assigned to it.' + LineEnding +
     '   The counter turns green when the number of labels equals the number of symbols.' + LineEnding +
+    ' - If a letter was split into pieces (e.g. a dot or a stroke that does not touch the' + LineEnding +
+    '   letter) or a speck of dirt became a symbol, RIGHT-CLICK the symbol on the image or in' + LineEnding +
+    '   the strip and choose "Merge with previous/next symbol" or "Remove this piece".' + LineEnding +
+    '   (Changing a setting re-segments the image and undoes these manual corrections.)' + LineEnding +
     ' - Click "Add as training samples".' + LineEnding +
     ' - If one symbol needs a label of several characters, tick "Labels are separated by spaces"' + LineEnding +
     '   and write the labels separated by spaces, e.g.:  fi  A  B  ' + LineEnding + LineEnding +
+    'GENERATE FROM FONT' + LineEnding +
+    '------------------' + LineEnding +
+    'Click "Generate from font..." and choose a ready-made set: English (A-Z a-z 0-9),' + LineEnding +
+    'Thai consonants, Thai vowels and tone marks, Thai digits, everything Thai, or the text' + LineEnding +
+    'typed in the label box. Then pick a font; the image is created and segmented.' + LineEnding +
+    'Click "Add as training samples" and repeat with other fonts (Tahoma, Leelawadee UI,' + LineEnding +
+    'Angsana New, Cordia New, Browallia New...). Use 28 pt or larger for Thai.' + LineEnding + LineEnding +
+    'THAI TEXT' + LineEnding +
+    '---------' + LineEnding +
+    'Tick "Thai mode" on the Settings tab (the Thai sets do this automatically). Upper and' + LineEnding +
+    'lower vowels and tone marks are then separate symbols, so a few dozen classes are enough' + LineEnding +
+    'to read any Thai word. When reading, they are put back in the correct order' + LineEnding +
+    '(consonant, vowel, tone mark). SARA AE is learned as two SARA E, SARA AM as NIKHAHIT +' + LineEnding +
+    'SARA AA, and the bottom stroke of YO YING as its own symbol; all are joined back' + LineEnding +
+    'automatically in the text that is read. Keep Thai mode ON when reading Thai text, and' + LineEnding +
+    'OFF for English (in Thai mode the dot of i/j becomes a separate symbol).' + LineEnding + LineEnding +
     'TEACHING FROM MANY IMAGES AT ONCE (batch learning)' + LineEnding +
     '--------------------------------------------------' + LineEnding +
     'Use this when you have many images of the SAME character or the SAME word,' + LineEnding +
@@ -296,6 +341,8 @@ begin
         Log('Could not load the default model: ' + E.Message);
     end;
 
+  CreateGlyphMenu;
+  CreateSetMenu;
   RefreshClassList;
   UpdateButtons;
   pcMain.ActivePage := tsLearn;
@@ -358,6 +405,7 @@ begin
   Result.MergeParts := chkMergeParts.Checked;
   Result.MinArea := seMinArea.Value;
   Result.SpaceRatio := seSpace.Value;
+  Result.ThaiMarks := chkThaiMarks.Checked;
 end;
 
 function TFormMain.GetTokens: TStringArr;
@@ -382,7 +430,8 @@ begin
     end;
   end
   else
-    Result := TokenizeLabels(memoLabels.Text, chkSplitSpace.Checked, chkMergeParts.Checked);
+    Result := TokenizeLabels(memoLabels.Text, chkSplitSpace.Checked,
+      chkMergeParts.Checked and not chkThaiMarks.Checked);
 end;
 
 function TFormMain.SelectedMethod: TClassifier;
@@ -674,7 +723,84 @@ begin
   Log('Image saved: ' + SaveImageDialog.FileName);
 end;
 
+procedure TFormMain.CreateSetMenu;
+
+  procedure AddItem(const ACaption: string; ATag: Integer);
+  var
+    MI: TMenuItem;
+  begin
+    MI := TMenuItem.Create(FSetMenu);
+    MI.Caption := ACaption;
+    MI.Tag := ATag;
+    if ATag >= 0 then
+      MI.OnClick := @SampleSetClick;
+    FSetMenu.Items.Add(MI);
+  end;
+
+begin
+  FSetMenu := TPopupMenu.Create(Self);
+  AddItem('English: A-Z  a-z  0-9', 0);
+  AddItem('-', -1);
+  AddItem('Thai: consonants  ' + Copy(THAI_CONSONANTS, 1, 9) + '...', 1);
+  AddItem('Thai: vowels and tone marks  ' + #$E0#$B8#$AD#$E0#$B8#$B0 + ' ' + #$E0#$B8#$AD#$E0#$B8#$B4 +
+    ' ' + #$E0#$B8#$AD#$E0#$B9#$88 + '...', 2);
+  AddItem('Thai: digits  ' + THAI_DIGITS, 3);
+  AddItem('Thai: everything (consonants, vowels, tone marks, digits)', 4);
+  AddItem('-', -1);
+  AddItem('Use the text typed in the label box', 5);
+end;
+
 procedure TFormMain.btnFontSampleClick(Sender: TObject);
+var
+  P: TPoint;
+begin
+  P := btnFontSample.ClientToScreen(Point(0, btnFontSample.Height));
+  FSetMenu.PopUp(P.X, P.Y);
+end;
+
+procedure TFormMain.SampleSetClick(Sender: TObject);
+var
+  S: string;
+  Thai: Boolean;
+begin
+  Thai := True;
+  case (Sender as TMenuItem).Tag of
+    0:
+      begin
+        S := DEFAULT_TEXT;
+        Thai := False;
+      end;
+    1: S := THAI_CONSONANTS;
+    2: S := THAI_VOWELS;
+    3: S := THAI_DIGITS;
+    4: S := THAI_CONSONANTS + LineEnding + THAI_VOWELS + LineEnding + THAI_DIGITS;
+  else
+    // the user's own text: keep the current settings
+    if Trim(memoLabels.Text) = '' then
+    begin
+      MessageDlg('Type the text to draw in the label box first.', mtInformation, [mbOK], 0);
+      memoLabels.SetFocus;
+      Exit;
+    end;
+    GenerateFromFont;
+    Exit;
+  end;
+  FUpdating := True;
+  try
+    memoLabels.Text := S;
+    chkSplitSpace.Checked := False;
+    chkWholeImage.Checked := False;
+    chkThaiMarks.Checked := Thai;
+  finally
+    FUpdating := False;
+  end;
+  if Thai then
+    Log('Thai mode is ON (Settings tab): vowels and tone marks are learned as separate symbols. ' +
+      'Keep it ON when reading Thai text.');
+  GenerateFromFont;
+end;
+
+procedure TFormMain.GenerateFromFont;
 const
   MARGIN = 24;
 var
@@ -703,7 +829,8 @@ begin
         end;
       end
       else
-        Toks[i] := TokenizeLabels(Lines[i], chkSplitSpace.Checked, chkMergeParts.Checked);
+        // draw whole grapheme clusters (a Thai vowel or tone mark cannot be drawn alone)
+        Toks[i] := TokenizeLabels(Lines[i], chkSplitSpace.Checked, True);
 
     Bmp.PixelFormat := pf24bit;
     Bmp.SetSize(16, 16);
@@ -761,7 +888,7 @@ begin
   UpdateBinary;
   Opt := GetOptions;
   Opt.WholeImage := Whole;
-  FGlyphs := SegmentGlyphs(FBin, Opt);
+  FGlyphs := SegmentGlyphsEx(FBin, Opt, FLab);
   if not Quiet then
     Log(Format('Found %d symbol(s) (threshold %d)', [Length(FGlyphs), FThreshold]));
 end;
@@ -783,7 +910,11 @@ begin
     if (NG > 0) and (NG = Length(FTokens)) then
       lblMatch.Font.Color := clGreen
     else
+    begin
       lblMatch.Font.Color := clRed;
+      if NG > 0 then
+        lblMatch.Caption := lblMatch.Caption + '   (right-click a symbol to merge/remove)';
+    end;
   end
   else
   begin
@@ -1205,6 +1336,101 @@ begin
   lblTrain.Caption := 'Not trained';
   pbTrain.Position := 0;
   Log('Model cleared');
+end;
+
+{ ---------- Manual symbol corrections (right-click) ---------- }
+
+procedure TFormMain.CreateGlyphMenu;
+
+  procedure AddItem(const ACaption: string; AClick: TNotifyEvent);
+  var
+    MI: TMenuItem;
+  begin
+    MI := TMenuItem.Create(FGlyphMenu);
+    MI.Caption := ACaption;
+    MI.OnClick := AClick;
+    FGlyphMenu.Items.Add(MI);
+  end;
+
+begin
+  FGlyphMenu := TPopupMenu.Create(Self);
+  AddItem('Merge with previous symbol', @MergePrevClick);
+  AddItem('Merge with next symbol', @MergeNextClick);
+  AddItem('-', nil);
+  AddItem('Remove this piece (noise)', @RemoveGlyphClick);
+  pbImage.OnMouseDown := @ImageMouseDown;
+  pbGlyphs.OnMouseDown := @GlyphsMouseDown;
+end;
+
+procedure TFormMain.ShowGlyphMenu(Idx: Integer);
+var
+  P: TPoint;
+begin
+  if (Idx < 0) or (Idx > High(FGlyphs)) or FTraining or FBusy then Exit;
+  FMenuGlyph := Idx;
+  FGlyphMenu.Items[0].Enabled := (Idx > 0) and (FGlyphs[Idx - 1].Line = FGlyphs[Idx].Line);
+  FGlyphMenu.Items[1].Enabled := (Idx < High(FGlyphs)) and (FGlyphs[Idx + 1].Line = FGlyphs[Idx].Line);
+  P := Mouse.CursorPos;
+  FGlyphMenu.PopUp(P.X, P.Y);
+end;
+
+procedure TFormMain.ImageMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  i, PX, PY: Integer;
+begin
+  if Button <> mbRight then Exit;
+  PX := Round(X / FZoom);
+  PY := Round(Y / FZoom);
+  for i := 0 to High(FGlyphs) do
+    if (PX >= FGlyphs[i].R.Left - 2) and (PX <= FGlyphs[i].R.Right + 2) and
+       (PY >= FGlyphs[i].R.Top - 2) and (PY <= FGlyphs[i].R.Bottom + 2) then
+    begin
+      ShowGlyphMenu(i);
+      Exit;
+    end;
+end;
+
+procedure TFormMain.GlyphsMouseDown(Sender: TObject; Button: TMouseButton; Shift: TShiftState; X, Y: Integer);
+var
+  Cols, Idx: Integer;
+begin
+  if Button <> mbRight then Exit;
+  Cols := Max(1, pbGlyphs.Width div CELL_W);
+  if X div CELL_W >= Cols then Exit;
+  Idx := (Y div CELL_H) * Cols + X div CELL_W;
+  ShowGlyphMenu(Idx);
+end;
+
+procedure TFormMain.AfterGlyphEdit(const What: string);
+begin
+  if FMode = gmRead then
+  begin
+    // read mode: classify again so the result text follows the correction
+    ClassifyGlyphs(FGlyphs, SelectedMethod);
+    memoResult.Text := GlyphsToText(FGlyphs, GetOptions);
+  end;
+  AlignTokens;
+  Log(What + Format(' - now %d symbol(s)', [Length(FGlyphs)]));
+end;
+
+procedure TFormMain.MergePrevClick(Sender: TObject);
+begin
+  if FMenuGlyph < 1 then Exit;
+  MergeGlyphs(FBin, FLab, FGlyphs, FMenuGlyph - 1, FMenuGlyph);
+  AfterGlyphEdit(Format('Merged symbol %d into %d', [FMenuGlyph + 1, FMenuGlyph]));
+end;
+
+procedure TFormMain.MergeNextClick(Sender: TObject);
+begin
+  if FMenuGlyph >= High(FGlyphs) then Exit;
+  MergeGlyphs(FBin, FLab, FGlyphs, FMenuGlyph, FMenuGlyph + 1);
+  AfterGlyphEdit(Format('Merged symbol %d into %d', [FMenuGlyph + 2, FMenuGlyph + 1]));
+end;
+
+procedure TFormMain.RemoveGlyphClick(Sender: TObject);
+begin
+  RemoveGlyph(FGlyphs, FMenuGlyph);
+  AfterGlyphEdit(Format('Removed symbol %d', [FMenuGlyph + 1]));
 end;
 
 { ---------- Drawing ---------- }

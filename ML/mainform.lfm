@@ -51,7 +51,7 @@ object FormMain: TFormMain
     object btnFontSample: TButton
       Left = 186
       Height = 30
-      Hint = 'Create a training image from the text box using a font of your choice'
+      Hint = 'Create a training image from a ready-made set (English, Thai) or from the text box, using a font of your choice'
       Top = 7
       Width = 140
       Caption = 'Generate from font...'
@@ -648,23 +648,37 @@ object FormMain: TFormMain
           Height = 19
           Top = 130
           Width = 380
-          Caption = 'Merge vertically stacked parts (dot of i/j, Thai vowels)'
+          Caption = 'Merge vertically stacked parts (dot of i/j, accents)'
           Checked = True
           OnChange = SettingsChange
           State = cbChecked
           TabOrder = 3
         end
+        object chkThaiMarks: TCheckBox
+          Left = 8
+          Height = 19
+          Hint = 'Thai text: upper/lower vowels and tone marks are learned and read as their own symbols'
+          Top = 152
+          Width = 380
+          Caption = 'Thai mode: vowels and tone marks are separate symbols'
+          Font.Style = [fsBold]
+          OnChange = SettingsChange
+          ParentFont = False
+          ParentShowHint = False
+          ShowHint = True
+          TabOrder = 8
+        end
         object lblMinArea: TLabel
           Left = 8
           Height = 15
-          Top = 164
+          Top = 186
           Width = 220
           Caption = 'Ignore specks smaller than (pixels):'
         end
         object seMinArea: TSpinEdit
           Left = 260
           Height = 23
-          Top = 160
+          Top = 182
           Width = 80
           MaxValue = 10000
           MinValue = 1
@@ -675,14 +689,14 @@ object FormMain: TFormMain
         object lblSpace: TLabel
           Left = 8
           Height = 15
-          Top = 196
+          Top = 218
           Width = 240
           Caption = 'Max word space (x line height):'
         end
         object seSpace: TFloatSpinEdit
           Left = 260
           Height = 23
-          Top = 192
+          Top = 214
           Width = 80
           DecimalPlaces = 2
           Increment = 0.05
@@ -694,7 +708,7 @@ object FormMain: TFormMain
         object chkShowBinary: TCheckBox
           Left = 8
           Height = 19
-          Top = 230
+          Top = 252
           Width = 380
           Caption = 'Show the black && white image used for processing'
           OnChange = SettingsChange
@@ -703,7 +717,7 @@ object FormMain: TFormMain
         object chkShowBoxes: TCheckBox
           Left = 8
           Height = 19
-          Top = 256
+          Top = 278
           Width = 380
           Caption = 'Show boxes and labels on the image'
           Checked = True

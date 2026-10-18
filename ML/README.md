@@ -14,6 +14,10 @@ Press **F1** or click **Help** in the program for the full user guide.
    in one step. Tick **Whole image is ONE symbol** to learn each image as a single item (whole word).
 4. Click **Start training** to train the neural network.
 
+**Generate from font...** offers ready-made sets: English, Thai consonants, Thai vowels & tone marks,
+Thai digits, all Thai, or your own text. Thai sets switch on **Thai mode** (Settings tab): vowels and
+tone marks become separate symbols and are put back in the right order when reading.
+
 **Read tab**: **Read text from image** or **Read multiple images...**, using one of the classifiers
 (MLP, k-NN, nearest centroid, ensemble vote) or **Compare all methods**.
 
