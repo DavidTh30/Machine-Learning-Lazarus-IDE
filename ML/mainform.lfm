@@ -1,0 +1,826 @@
+object FormMain: TFormMain
+  Left = 120
+  Height = 780
+  Top = 60
+  Width = 1200
+  AllowDropFiles = True
+  Caption = 'Lazarus OCR - Learn and read text from images'
+  ClientHeight = 780
+  ClientWidth = 1200
+  KeyPreview = True
+  Position = poScreenCenter
+  OnCloseQuery = FormCloseQuery
+  OnCreate = FormCreate
+  OnDestroy = FormDestroy
+  OnDropFiles = FormDropFiles
+  OnKeyDown = FormKeyDown
+  object pnlTop: TPanel
+    Left = 0
+    Height = 44
+    Top = 0
+    Width = 1200
+    Align = alTop
+    BevelOuter = bvNone
+    ClientHeight = 44
+    ClientWidth = 1200
+    TabOrder = 0
+    object btnOpen: TButton
+      Left = 8
+      Height = 30
+      Hint = 'Open an image file (you can also drag and drop a file onto the window)'
+      Top = 7
+      Width = 100
+      Caption = 'Open image...'
+      OnClick = btnOpenClick
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 0
+    end
+    object btnPaste: TButton
+      Left = 112
+      Height = 30
+      Hint = 'Paste an image from the clipboard'
+      Top = 7
+      Width = 70
+      Caption = 'Paste'
+      OnClick = btnPasteClick
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 1
+    end
+    object btnFontSample: TButton
+      Left = 186
+      Height = 30
+      Hint = 'Create a training image from the text box using a font of your choice'
+      Top = 7
+      Width = 140
+      Caption = 'Generate from font...'
+      OnClick = btnFontSampleClick
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 2
+    end
+    object btnSaveImage: TButton
+      Left = 330
+      Height = 30
+      Top = 7
+      Width = 100
+      Caption = 'Save image...'
+      OnClick = btnSaveImageClick
+      TabOrder = 3
+    end
+    object lblZoom: TLabel
+      Left = 444
+      Height = 15
+      Top = 14
+      Width = 35
+      Caption = 'Zoom:'
+    end
+    object cbZoom: TComboBox
+      Left = 484
+      Height = 23
+      Top = 10
+      Width = 70
+      ItemHeight = 15
+      ItemIndex = 1
+      Items.Strings = (
+        '50%'
+        '100%'
+        '150%'
+        '200%'
+        '300%'
+      )
+      OnChange = cbZoomChange
+      Style = csDropDownList
+      TabOrder = 4
+      Text = '100%'
+    end
+    object btnLoadModel: TButton
+      Left = 580
+      Height = 30
+      Top = 7
+      Width = 100
+      Caption = 'Load model...'
+      OnClick = btnLoadModelClick
+      TabOrder = 5
+    end
+    object btnSaveModel: TButton
+      Left = 684
+      Height = 30
+      Top = 7
+      Width = 100
+      Caption = 'Save model...'
+      OnClick = btnSaveModelClick
+      TabOrder = 6
+    end
+    object btnClearModel: TButton
+      Left = 788
+      Height = 30
+      Top = 7
+      Width = 100
+      Caption = 'Clear model'
+      OnClick = btnClearModelClick
+      TabOrder = 7
+    end
+    object btnInspect: TButton
+      Left = 892
+      Height = 30
+      Hint = 'View every stored sample, find and fix wrong labels, open/save any .ocrm file'
+      Top = 7
+      Width = 120
+      Caption = 'Inspect model...'
+      OnClick = btnInspectClick
+      ParentShowHint = False
+      ShowHint = True
+      TabOrder = 9
+    end
+    object btnHelp: TButton
+      Left = 1020
+      Height = 30
+      Top = 7
+      Width = 90
+      Caption = 'Help (F1)'
+      Font.Style = [fsBold]
+      OnClick = btnHelpClick
+      ParentFont = False
+      TabOrder = 8
+    end
+  end
+  object StatusBar1: TStatusBar
+    Left = 0
+    Height = 23
+    Top = 757
+    Width = 1200
+    Panels = <>
+    SimplePanel = True
+  end
+  object memoLog: TMemo
+    Left = 0
+    Height = 110
+    Top = 647
+    Width = 1200
+    Align = alBottom
+    ReadOnly = True
+    ScrollBars = ssAutoVertical
+    TabOrder = 2
+  end
+  object Splitter2: TSplitter
+    Cursor = crVSplit
+    Left = 0
+    Height = 5
+    Top = 642
+    Width = 1200
+    Align = alBottom
+    ResizeAnchor = akBottom
+  end
+  object pnlRight: TPanel
+    Left = 795
+    Height = 598
+    Top = 44
+    Width = 405
+    Align = alRight
+    BevelOuter = bvNone
+    ClientHeight = 598
+    ClientWidth = 405
+    TabOrder = 3
+    object pcMain: TPageControl
+      Left = 0
+      Height = 598
+      Top = 0
+      Width = 405
+      ActivePage = tsLearn
+      Align = alClient
+      TabIndex = 0
+      TabOrder = 0
+      object tsLearn: TTabSheet
+        Caption = 'Learn'
+        ClientHeight = 570
+        ClientWidth = 397
+        object lblLabels: TLabel
+          Left = 8
+          Height = 15
+          Top = 8
+          Width = 380
+          Caption = 'Label / text in the image (in order: left to right, top to bottom):'
+        end
+        object memoLabels: TMemo
+          Left = 8
+          Height = 70
+          Top = 26
+          Width = 381
+          Anchors = [akTop, akLeft, akRight]
+          Font.Height = -18
+          OnChange = memoLabelsChange
+          ParentFont = False
+          ScrollBars = ssAutoVertical
+          TabOrder = 0
+        end
+        object chkSplitSpace: TCheckBox
+          Left = 8
+          Height = 19
+          Top = 100
+          Width = 380
+          Caption = 'Labels are separated by spaces (multi-character labels)'
+          OnChange = memoLabelsChange
+          TabOrder = 1
+        end
+        object chkWholeImage: TCheckBox
+          Left = 8
+          Height = 19
+          Hint = 'Learn the whole image as a single item, e.g. a whole word or a multi-stroke character'
+          Top = 122
+          Width = 380
+          Caption = 'Whole image is ONE symbol (a character or a whole word)'
+          OnChange = SettingsChange
+          ParentShowHint = False
+          ShowHint = True
+          TabOrder = 2
+        end
+        object btnSegment: TButton
+          Left = 8
+          Height = 30
+          Top = 148
+          Width = 186
+          Caption = 'Segment symbols'
+          OnClick = btnSegmentClick
+          TabOrder = 3
+        end
+        object btnAddSamples: TButton
+          Left = 200
+          Height = 30
+          Top = 148
+          Width = 189
+          Anchors = [akTop, akLeft, akRight]
+          Caption = 'Add as training samples'
+          OnClick = btnAddSamplesClick
+          TabOrder = 4
+        end
+        object btnBatchLearn: TButton
+          Left = 8
+          Height = 30
+          Hint = 'Select many images that all show the SAME character or word (the label typed above)'
+          Top = 182
+          Width = 381
+          Anchors = [akTop, akLeft, akRight]
+          Caption = 'Learn from multiple images (same label)...'
+          Font.Style = [fsBold]
+          OnClick = btnBatchLearnClick
+          ParentFont = False
+          ParentShowHint = False
+          ShowHint = True
+          TabOrder = 5
+        end
+        object lblMatch: TLabel
+          Left = 8
+          Height = 15
+          Top = 218
+          Width = 380
+          Caption = '-'
+          ParentFont = False
+        end
+        object gbTrain: TGroupBox
+          Left = 8
+          Height = 150
+          Top = 240
+          Width = 381
+          Anchors = [akTop, akLeft, akRight]
+          Caption = 'Train the neural network (MLP)'
+          ClientHeight = 130
+          ClientWidth = 377
+          TabOrder = 6
+          object lblEpochs: TLabel
+            Left = 8
+            Height = 15
+            Top = 8
+            Width = 60
+            Caption = 'Epochs:'
+          end
+          object seEpochs: TSpinEdit
+            Left = 80
+            Height = 23
+            Top = 4
+            Width = 80
+            MaxValue = 100000
+            MinValue = 1
+            TabOrder = 0
+            Value = 300
+          end
+          object lblHidden: TLabel
+            Left = 176
+            Height = 15
+            Top = 8
+            Width = 95
+            Caption = 'Hidden neurons:'
+          end
+          object seHidden: TSpinEdit
+            Left = 280
+            Height = 23
+            Top = 4
+            Width = 80
+            MaxValue = 1024
+            MinValue = 4
+            TabOrder = 1
+            Value = 96
+          end
+          object lblLR: TLabel
+            Left = 8
+            Height = 15
+            Top = 38
+            Width = 70
+            Caption = 'Learn rate:'
+          end
+          object seLR: TFloatSpinEdit
+            Left = 80
+            Height = 23
+            Top = 34
+            Width = 80
+            DecimalPlaces = 3
+            Increment = 0.01
+            MaxValue = 1
+            MinValue = 0.001
+            TabOrder = 2
+            Value = 0.05
+          end
+          object chkAugment: TCheckBox
+            Left = 8
+            Height = 19
+            Top = 64
+            Width = 360
+            Caption = 'Augmentation (randomly shift samples by 1 cell)'
+            Checked = True
+            State = cbChecked
+            TabOrder = 3
+          end
+          object btnTrain: TButton
+            Left = 8
+            Height = 30
+            Top = 92
+            Width = 186
+            Caption = 'Start training'
+            Font.Style = [fsBold]
+            OnClick = btnTrainClick
+            ParentFont = False
+            TabOrder = 4
+          end
+          object btnStop: TButton
+            Left = 200
+            Height = 30
+            Top = 92
+            Width = 90
+            Caption = 'Stop'
+            Enabled = False
+            OnClick = btnStopClick
+            TabOrder = 5
+          end
+        end
+        object pbTrain: TProgressBar
+          Left = 8
+          Height = 16
+          Top = 396
+          Width = 381
+          Anchors = [akTop, akLeft, akRight]
+          TabOrder = 7
+        end
+        object lblTrain: TLabel
+          Left = 8
+          Height = 15
+          Top = 416
+          Width = 380
+          Caption = 'Not trained'
+        end
+      end
+      object tsRead: TTabSheet
+        Caption = 'Read'
+        ClientHeight = 570
+        ClientWidth = 397
+        object pnlReadTop: TPanel
+          Left = 0
+          Height = 196
+          Top = 0
+          Width = 397
+          Align = alTop
+          BevelOuter = bvNone
+          ClientHeight = 196
+          ClientWidth = 397
+          TabOrder = 0
+          object lblMethod: TLabel
+            Left = 8
+            Height = 15
+            Top = 12
+            Width = 80
+            Caption = 'Classifier:'
+          end
+          object cbMethod: TComboBox
+            Left = 90
+            Height = 23
+            Top = 8
+            Width = 240
+            ItemHeight = 15
+            ItemIndex = 0
+            Items.Strings = (
+              'MLP neural network'
+              'k-Nearest Neighbors (k-NN)'
+              'Nearest centroid'
+              'Ensemble vote (all classifiers)'
+              'Compare all methods'
+            )
+            Style = csDropDownList
+            TabOrder = 0
+            Text = 'MLP neural network'
+          end
+          object lblK: TLabel
+            Left = 8
+            Height = 15
+            Top = 42
+            Width = 80
+            Caption = 'k (for k-NN):'
+          end
+          object seK: TSpinEdit
+            Left = 90
+            Height = 23
+            Top = 38
+            Width = 70
+            MaxValue = 25
+            MinValue = 1
+            TabOrder = 1
+            Value = 3
+          end
+          object chkReadWhole: TCheckBox
+            Left = 8
+            Height = 19
+            Top = 68
+            Width = 380
+            Caption = 'Read whole image as one symbol/word'
+            TabOrder = 2
+          end
+          object btnRecognize: TButton
+            Left = 8
+            Height = 36
+            Top = 94
+            Width = 381
+            Anchors = [akTop, akLeft, akRight]
+            Caption = 'Read text from image'
+            Font.Style = [fsBold]
+            OnClick = btnRecognizeClick
+            ParentFont = False
+            TabOrder = 3
+          end
+          object btnBatchRead: TButton
+            Left = 8
+            Height = 30
+            Top = 136
+            Width = 381
+            Anchors = [akTop, akLeft, akRight]
+            Caption = 'Read multiple images...'
+            OnClick = btnBatchReadClick
+            TabOrder = 4
+          end
+          object lblResult: TLabel
+            Left = 8
+            Height = 15
+            Top = 176
+            Width = 100
+            Caption = 'Result:'
+          end
+        end
+        object memoResult: TMemo
+          Left = 8
+          Height = 332
+          Top = 196
+          Width = 381
+          Align = alClient
+          BorderSpacing.Left = 8
+          BorderSpacing.Right = 8
+          Font.Height = -20
+          ParentFont = False
+          ScrollBars = ssAutoBoth
+          TabOrder = 1
+        end
+        object pnlReadButtons: TPanel
+          Left = 0
+          Height = 42
+          Top = 528
+          Width = 397
+          Align = alBottom
+          BevelOuter = bvNone
+          ClientHeight = 42
+          ClientWidth = 397
+          TabOrder = 2
+          object btnCopyResult: TButton
+            Left = 8
+            Height = 28
+            Top = 6
+            Width = 110
+            Caption = 'Copy result'
+            OnClick = btnCopyResultClick
+            TabOrder = 0
+          end
+          object btnUseResult: TButton
+            Left = 124
+            Height = 28
+            Top = 6
+            Width = 265
+            Caption = 'Correct mistakes and teach...'
+            OnClick = btnUseResultClick
+            TabOrder = 1
+          end
+        end
+      end
+      object tsClasses: TTabSheet
+        Caption = 'Classes'
+        ClientHeight = 570
+        ClientWidth = 397
+        object lblClasses: TLabel
+          Left = 8
+          Height = 15
+          Top = 8
+          Width = 380
+          Align = alTop
+          BorderSpacing.Around = 8
+          Caption = 'Learned classes:'
+        end
+        object lbClasses: TListBox
+          Left = 8
+          Height = 489
+          Top = 31
+          Width = 381
+          Align = alClient
+          BorderSpacing.Left = 8
+          BorderSpacing.Right = 8
+          Font.Height = -16
+          ItemHeight = 0
+          ParentFont = False
+          TabOrder = 0
+        end
+        object pnlClassButtons: TPanel
+          Left = 0
+          Height = 42
+          Top = 528
+          Width = 397
+          Align = alBottom
+          BevelOuter = bvNone
+          ClientHeight = 42
+          ClientWidth = 397
+          TabOrder = 1
+          object btnDeleteClass: TButton
+            Left = 8
+            Height = 28
+            Top = 6
+            Width = 160
+            Caption = 'Delete selected class'
+            OnClick = btnDeleteClassClick
+            TabOrder = 0
+          end
+          object btnInspect2: TButton
+            Left = 176
+            Height = 28
+            Top = 6
+            Width = 213
+            Caption = 'Inspect / fix samples...'
+            Font.Style = [fsBold]
+            OnClick = btnInspectClick
+            ParentFont = False
+            TabOrder = 1
+          end
+        end
+      end
+      object tsSettings: TTabSheet
+        Caption = 'Settings'
+        ClientHeight = 570
+        ClientWidth = 397
+        object chkAutoThreshold: TCheckBox
+          Left = 8
+          Height = 19
+          Top = 10
+          Width = 380
+          Caption = 'Automatic black/white threshold (Otsu)'
+          Checked = True
+          OnChange = SettingsChange
+          State = cbChecked
+          TabOrder = 0
+        end
+        object lblThreshold: TLabel
+          Left = 8
+          Height = 15
+          Top = 38
+          Width = 380
+          Caption = 'Threshold: 128'
+        end
+        object tbThreshold: TTrackBar
+          Left = 8
+          Height = 30
+          Top = 56
+          Width = 381
+          Frequency = 16
+          Max = 255
+          OnChange = SettingsChange
+          Position = 128
+          Anchors = [akTop, akLeft, akRight]
+          Enabled = False
+          TabOrder = 1
+        end
+        object lblPolarity: TLabel
+          Left = 8
+          Height = 15
+          Top = 100
+          Width = 100
+          Caption = 'Text color:'
+        end
+        object cbPolarity: TComboBox
+          Left = 120
+          Height = 23
+          Top = 96
+          Width = 220
+          ItemHeight = 15
+          ItemIndex = 0
+          Items.Strings = (
+            'Automatic'
+            'Dark text on light background'
+            'Light text on dark background'
+          )
+          OnChange = SettingsChange
+          Style = csDropDownList
+          TabOrder = 2
+          Text = 'Automatic'
+        end
+        object chkMergeParts: TCheckBox
+          Left = 8
+          Height = 19
+          Top = 130
+          Width = 380
+          Caption = 'Merge vertically stacked parts (dot of i/j, Thai vowels)'
+          Checked = True
+          OnChange = SettingsChange
+          State = cbChecked
+          TabOrder = 3
+        end
+        object lblMinArea: TLabel
+          Left = 8
+          Height = 15
+          Top = 164
+          Width = 220
+          Caption = 'Ignore specks smaller than (pixels):'
+        end
+        object seMinArea: TSpinEdit
+          Left = 260
+          Height = 23
+          Top = 160
+          Width = 80
+          MaxValue = 10000
+          MinValue = 1
+          OnChange = SettingsChange
+          TabOrder = 4
+          Value = 4
+        end
+        object lblSpace: TLabel
+          Left = 8
+          Height = 15
+          Top = 196
+          Width = 240
+          Caption = 'Max word space (x line height):'
+        end
+        object seSpace: TFloatSpinEdit
+          Left = 260
+          Height = 23
+          Top = 192
+          Width = 80
+          DecimalPlaces = 2
+          Increment = 0.05
+          MaxValue = 5
+          MinValue = 0.05
+          TabOrder = 5
+          Value = 0.4
+        end
+        object chkShowBinary: TCheckBox
+          Left = 8
+          Height = 19
+          Top = 230
+          Width = 380
+          Caption = 'Show the black && white image used for processing'
+          OnChange = SettingsChange
+          TabOrder = 6
+        end
+        object chkShowBoxes: TCheckBox
+          Left = 8
+          Height = 19
+          Top = 256
+          Width = 380
+          Caption = 'Show boxes and labels on the image'
+          Checked = True
+          OnChange = chkShowBoxesChange
+          State = cbChecked
+          TabOrder = 7
+        end
+      end
+    end
+  end
+  object Splitter1: TSplitter
+    Left = 790
+    Height = 598
+    Top = 44
+    Width = 5
+    Align = alRight
+    ResizeAnchor = akRight
+  end
+  object pnlCenter: TPanel
+    Left = 0
+    Height = 598
+    Top = 44
+    Width = 790
+    Align = alClient
+    BevelOuter = bvNone
+    ClientHeight = 598
+    ClientWidth = 790
+    TabOrder = 4
+    object sbImage: TScrollBox
+      Left = 0
+      Height = 433
+      Top = 0
+      Width = 790
+      HorzScrollBar.Page = 1
+      VertScrollBar.Page = 1
+      Align = alClient
+      Color = clGray
+      ParentColor = False
+      TabOrder = 0
+      object pbImage: TPaintBox
+        Left = 0
+        Height = 10
+        Top = 0
+        Width = 10
+        OnPaint = pbImagePaint
+      end
+    end
+    object Splitter3: TSplitter
+      Cursor = crVSplit
+      Left = 0
+      Height = 5
+      Top = 433
+      Width = 790
+      Align = alBottom
+      ResizeAnchor = akBottom
+    end
+    object sbGlyphs: TScrollBox
+      Left = 0
+      Height = 160
+      Top = 438
+      Width = 790
+      HorzScrollBar.Page = 1
+      HorzScrollBar.Visible = False
+      VertScrollBar.Page = 1
+      Align = alBottom
+      Color = clWhite
+      ParentColor = False
+      TabOrder = 1
+      OnResize = sbGlyphsResize
+      object pbGlyphs: TPaintBox
+        Left = 0
+        Height = 150
+        Top = 0
+        Width = 786
+        Align = alTop
+        OnPaint = pbGlyphsPaint
+      end
+    end
+  end
+  object OpenPictureDialog1: TOpenPictureDialog
+    Title = 'Open image'
+    Left = 40
+    Top = 120
+  end
+  object OpenBatchDialog: TOpenPictureDialog
+    Title = 'Select images (Ctrl/Shift + click to select many)'
+    Options = [ofAllowMultiSelect, ofFileMustExist, ofEnableSizing, ofViewDetail]
+    Left = 40
+    Top = 180
+  end
+  object SaveImageDialog: TSaveDialog
+    Title = 'Save image'
+    DefaultExt = '.png'
+    Filter = 'PNG (*.png)|*.png|Bitmap (*.bmp)|*.bmp'
+    Options = [ofOverwritePrompt, ofEnableSizing, ofViewDetail]
+    Left = 120
+    Top = 120
+  end
+  object FontDialog1: TFontDialog
+    MinFontSize = 0
+    MaxFontSize = 0
+    Left = 200
+    Top = 120
+  end
+  object OpenDialog1: TOpenDialog
+    Title = 'Load model'
+    DefaultExt = '.ocrm'
+    Filter = 'LazOCR model (*.ocrm)|*.ocrm|All files (*.*)|*.*'
+    Left = 280
+    Top = 120
+  end
+  object SaveDialog1: TSaveDialog
+    Title = 'Save model'
+    DefaultExt = '.ocrm'
+    Filter = 'LazOCR model (*.ocrm)|*.ocrm'
+    Options = [ofOverwritePrompt, ofEnableSizing, ofViewDetail]
+    Left = 360
+    Top = 120
+  end
+end
